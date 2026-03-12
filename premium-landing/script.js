@@ -8,7 +8,7 @@ const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
 const coarsePointerQuery = window.matchMedia("(hover: none), (pointer: coarse)");
 const narrowViewportQuery = window.matchMedia("(max-width: 991px)");
 const GOOGLE_SHEETS_WEBAPP_URL =
-  "https://script.google.com/macros/s/AKfycby3KeHcF2AldB_AwSb4r-_0XDzBEyY-fghXqDwr9lT2B7VsEn8kjmguusAVrRWPmAq20Q/exec";
+  "https://script.google.com/macros/s/AKfycbyZmriaBMbv0ux1tSwXQJr6BR9UxAs8YEL0NyZORobvxnqhuky-VADzcFSK0m71KAtR/exec";
 const LEAD_ORIGIN = "leads-site-oficial-diego-knebel";
 const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"];
 
@@ -163,11 +163,30 @@ if (form && formFeedback) {
       body.append(key, value == null ? "" : String(value));
     });
 
-    await fetch(GOOGLE_SHEETS_WEBAPP_URL, {
+    const response = await fetch(GOOGLE_SHEETS_WEBAPP_URL, {
       method: "POST",
-      mode: "no-cors",
-      body
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+      },
+      body: body.toString()
     });
+
+    if (!response.ok) {
+      throw new Error(`Apps Script retornou HTTP ${response.status}`);
+    }
+
+    const raw = await response.text();
+    let parsed = null;
+
+    try {
+      parsed = raw ? JSON.parse(raw) : null;
+    } catch {
+      parsed = null;
+    }
+
+    if (parsed && parsed.ok === false) {
+      throw new Error(parsed.error || "Apps Script retornou erro");
+    }
   };
 
   form.addEventListener("submit", async (event) => {

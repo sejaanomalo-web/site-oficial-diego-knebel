@@ -4,12 +4,39 @@ const menuToggle = document.getElementById("menu-toggle");
 const siteNav = document.getElementById("site-nav");
 const form = document.getElementById("contact-form");
 const formFeedback = document.getElementById("form-feedback");
+const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+const coarsePointerQuery = window.matchMedia("(hover: none), (pointer: coarse)");
+const narrowViewportQuery = window.matchMedia("(max-width: 991px)");
 
 let ticking = false;
+let allowOrbParallax = true;
+
+const addMediaListener = (query, callback) => {
+  if (typeof query.addEventListener === "function") {
+    query.addEventListener("change", callback);
+    return;
+  }
+
+  if (typeof query.addListener === "function") {
+    query.addListener(callback);
+  }
+};
+
+const applyPerformanceProfile = () => {
+  const mobileLike = coarsePointerQuery.matches || narrowViewportQuery.matches;
+  document.body.classList.toggle("is-mobile", mobileLike);
+  allowOrbParallax = !mobileLike && !reducedMotionQuery.matches;
+
+  if (!allowOrbParallax) {
+    document.documentElement.style.setProperty("--scroll-y", "0px");
+  }
+};
 
 const onScroll = () => {
   header?.classList.toggle("scrolled", window.scrollY > 24);
-  document.documentElement.style.setProperty("--scroll-y", `${window.scrollY}px`);
+  if (allowOrbParallax) {
+    document.documentElement.style.setProperty("--scroll-y", `${window.scrollY}px`);
+  }
   ticking = false;
 };
 
@@ -23,6 +50,76 @@ window.addEventListener(
   },
   { passive: true }
 );
+
+addMediaListener(reducedMotionQuery, applyPerformanceProfile);
+addMediaListener(coarsePointerQuery, applyPerformanceProfile);
+addMediaListener(narrowViewportQuery, applyPerformanceProfile);
+applyPerformanceProfile();
+
+const setupInertiaScroll = () => {
+  let targetY = window.scrollY;
+  let currentY = window.scrollY;
+  let rafId = 0;
+  let animating = false;
+
+  const maxScrollTop = () => Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  const clampScroll = (value) => Math.min(maxScrollTop(), Math.max(0, value));
+
+  const tick = () => {
+    const delta = targetY - currentY;
+
+    if (Math.abs(delta) < 0.4) {
+      currentY = targetY;
+      window.scrollTo(0, currentY);
+      animating = false;
+      rafId = 0;
+      return;
+    }
+
+    currentY += delta * 0.14;
+    window.scrollTo(0, currentY);
+    rafId = requestAnimationFrame(tick);
+  };
+
+  const start = () => {
+    if (animating) return;
+    animating = true;
+    rafId = requestAnimationFrame(tick);
+  };
+
+  const handleWheel = (event) => {
+    if (event.ctrlKey || event.metaKey) return;
+    if (coarsePointerQuery.matches || narrowViewportQuery.matches || reducedMotionQuery.matches) return;
+    if (Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
+
+    event.preventDefault();
+    const unit = event.deltaMode === 1 ? 18 : 1;
+    const acceleration = Math.abs(event.deltaY) > 60 ? 1.06 : 0.9;
+    targetY = clampScroll(targetY + event.deltaY * unit * acceleration);
+    start();
+  };
+
+  const syncWithNativeScroll = () => {
+    if (!animating) {
+      targetY = window.scrollY;
+      currentY = window.scrollY;
+    }
+  };
+
+  const handleResize = () => {
+    targetY = clampScroll(targetY);
+    currentY = clampScroll(currentY);
+  };
+
+  window.addEventListener("wheel", handleWheel, { passive: false });
+  window.addEventListener("scroll", syncWithNativeScroll, { passive: true });
+  window.addEventListener("resize", handleResize, { passive: true });
+  window.addEventListener("beforeunload", () => {
+    if (rafId) cancelAnimationFrame(rafId);
+  });
+};
+
+setupInertiaScroll();
 
 window.addEventListener("load", () => {
   setTimeout(() => {
@@ -116,24 +213,52 @@ const controls = document.querySelectorAll("[data-rail-control]");
 if (track && viewport) {
   track.innerHTML += track.innerHTML;
 
-  const baseSpeed = 0.42;
-  const burstSpeed = 2.3;
+  const baseSpeedDesktop = 0.42;
+  const baseSpeedMobile = 0.24;
+  const burstSpeedDesktop = 2.3;
+  const burstSpeedMobile = 1.3;
 
   let currentX = 0;
-  let currentSpeed = baseSpeed;
-  let targetSpeed = baseSpeed;
+  let currentSpeed = baseSpeedDesktop;
+  let targetSpeed = baseSpeedDesktop;
   let currentDirection = 1;
   let targetDirection = 1;
   let paused = false;
   let rafId = 0;
   let limit = track.scrollWidth / 2;
+  let inView = false;
+  let pageVisible = !document.hidden;
+
+  const getBaseSpeed = () =>
+    document.body.classList.contains("is-mobile") ? baseSpeedMobile : baseSpeedDesktop;
+  const getBurstSpeed = () =>
+    document.body.classList.contains("is-mobile") ? burstSpeedMobile : burstSpeedDesktop;
 
   const refreshLimit = () => {
     limit = track.scrollWidth / 2;
   };
 
+  const canAnimate = () => !reducedMotionQuery.matches && inView && pageVisible && limit > 0;
+
+  const ensureAnimationState = () => {
+    if (canAnimate() && rafId === 0) {
+      rafId = requestAnimationFrame(animate);
+      return;
+    }
+
+    if (!canAnimate() && rafId !== 0) {
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+  };
+
   const animate = () => {
-    if (!paused && limit > 0) {
+    if (!canAnimate()) {
+      rafId = 0;
+      return;
+    }
+
+    if (!paused) {
       currentSpeed += (targetSpeed - currentSpeed) * 0.08;
       currentDirection += (targetDirection - currentDirection) * 0.12;
 
@@ -142,31 +267,41 @@ if (track && viewport) {
       if (currentX > limit) currentX -= limit;
       if (currentX < 0) currentX += limit;
 
-      track.style.transform = `translateX(-${currentX}px)`;
+      track.style.transform = `translate3d(-${currentX}px, 0, 0)`;
     }
 
     rafId = requestAnimationFrame(animate);
   };
 
-  viewport.addEventListener("mouseenter", () => {
-    paused = true;
-  });
-
-  viewport.addEventListener("mouseleave", () => {
-    paused = false;
-    targetSpeed = baseSpeed;
+  const normalize = () => {
     targetDirection = 1;
-  });
+    targetSpeed = getBaseSpeed();
+  };
+
+  const pauseRail = () => {
+    paused = true;
+  };
+
+  const resumeRail = () => {
+    paused = false;
+    normalize();
+    ensureAnimationState();
+  };
+
+  if (!coarsePointerQuery.matches) {
+    viewport.addEventListener("mouseenter", pauseRail);
+    viewport.addEventListener("mouseleave", resumeRail);
+  }
+
+  viewport.addEventListener("touchstart", pauseRail, { passive: true });
+  viewport.addEventListener("touchend", resumeRail, { passive: true });
+  viewport.addEventListener("touchcancel", resumeRail, { passive: true });
 
   const boost = (side) => {
     targetDirection = side === "left" ? 1 : -1;
-    targetSpeed = burstSpeed;
+    targetSpeed = getBurstSpeed();
     paused = false;
-  };
-
-  const normalize = () => {
-    targetDirection = 1;
-    targetSpeed = baseSpeed;
+    ensureAnimationState();
   };
 
   controls.forEach((control) => {
@@ -180,12 +315,48 @@ if (track && viewport) {
     control.addEventListener("touchend", normalize, { passive: true });
   });
 
-  window.addEventListener("resize", refreshLimit);
+  const visibilityHandler = () => {
+    pageVisible = !document.hidden;
+    ensureAnimationState();
+  };
+
+  const viewportObserver = new IntersectionObserver(
+    (entries) => {
+      inView = Boolean(entries[0]?.isIntersecting);
+      ensureAnimationState();
+    },
+    { threshold: 0.08 }
+  );
+
+  viewportObserver.observe(viewport);
+  document.addEventListener("visibilitychange", visibilityHandler);
+  window.addEventListener(
+    "resize",
+    () => {
+      refreshLimit();
+      normalize();
+      ensureAnimationState();
+    },
+    { passive: true }
+  );
+  addMediaListener(coarsePointerQuery, () => {
+    normalize();
+    ensureAnimationState();
+  });
+  addMediaListener(narrowViewportQuery, () => {
+    normalize();
+    ensureAnimationState();
+  });
+  addMediaListener(reducedMotionQuery, ensureAnimationState);
+
   refreshLimit();
-  animate();
+  normalize();
+  ensureAnimationState();
 
   window.addEventListener("beforeunload", () => {
-    cancelAnimationFrame(rafId);
+    if (rafId) cancelAnimationFrame(rafId);
+    viewportObserver.disconnect();
+    document.removeEventListener("visibilitychange", visibilityHandler);
   });
 }
 

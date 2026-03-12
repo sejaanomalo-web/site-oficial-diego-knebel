@@ -9,6 +9,7 @@ const coarsePointerQuery = window.matchMedia("(hover: none), (pointer: coarse)")
 const narrowViewportQuery = window.matchMedia("(max-width: 991px)");
 const GOOGLE_SHEETS_WEBAPP_URL =
   "https://script.google.com/macros/s/AKfycbyZmriaBMbv0ux1tSwXQJr6BR9UxAs8YEL0NyZORobvxnqhuky-VADzcFSK0m71KAtR/exec";
+const GOOGLE_SHEETS_TOKEN = "troque-por-um-token-forte";
 const LEAD_ORIGIN = "leads-site-oficial-diego-knebel";
 const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"];
 
@@ -195,6 +196,7 @@ if (form && formFeedback) {
     const data = new FormData(form);
     const attribution = pickAttribution();
     const payload = {
+      token: GOOGLE_SHEETS_TOKEN,
       nome: String(data.get("nome") || "").trim(),
       email: String(data.get("email") || "").trim(),
       telefone: String(data.get("telefone") || "").trim(),

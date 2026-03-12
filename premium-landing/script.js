@@ -57,66 +57,147 @@ addMediaListener(narrowViewportQuery, applyPerformanceProfile);
 applyPerformanceProfile();
 
 const setupInertiaScroll = () => {
-  let targetY = window.scrollY;
-  let currentY = window.scrollY;
-  let rafId = 0;
-  let animating = false;
+  const state = {
+    targetY: window.scrollY,
+    currentY: window.scrollY,
+    velocity: 0,
+    rafId: 0,
+    running: false
+  };
+
+  const config = {
+    wheelMultiplier: 0.94,
+    spring: 0.11,
+    friction: 0.78,
+    minDistance: 0.15,
+    minVelocity: 0.15
+  };
 
   const maxScrollTop = () => Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
   const clampScroll = (value) => Math.min(maxScrollTop(), Math.max(0, value));
+  const isEnabled = () => !reducedMotionQuery.matches && !coarsePointerQuery.matches;
+
+  const stop = () => {
+    if (state.rafId) cancelAnimationFrame(state.rafId);
+    state.rafId = 0;
+    state.running = false;
+    state.velocity = 0;
+  };
 
   const tick = () => {
-    const delta = targetY - currentY;
+    const distance = state.targetY - state.currentY;
 
-    if (Math.abs(delta) < 0.4) {
-      currentY = targetY;
-      window.scrollTo(0, currentY);
-      animating = false;
-      rafId = 0;
+    state.velocity += distance * config.spring;
+    state.velocity *= config.friction;
+    state.currentY = clampScroll(state.currentY + state.velocity);
+    window.scrollTo(0, state.currentY);
+
+    if (Math.abs(distance) <= config.minDistance && Math.abs(state.velocity) <= config.minVelocity) {
+      state.currentY = state.targetY;
+      window.scrollTo(0, state.currentY);
+      stop();
       return;
     }
 
-    currentY += delta * 0.14;
-    window.scrollTo(0, currentY);
-    rafId = requestAnimationFrame(tick);
+    state.rafId = requestAnimationFrame(tick);
   };
 
   const start = () => {
-    if (animating) return;
-    animating = true;
-    rafId = requestAnimationFrame(tick);
+    if (state.running || !isEnabled()) return;
+    state.running = true;
+    state.rafId = requestAnimationFrame(tick);
   };
 
-  const handleWheel = (event) => {
-    if (event.ctrlKey || event.metaKey) return;
-    if (coarsePointerQuery.matches || narrowViewportQuery.matches || reducedMotionQuery.matches) return;
-    if (Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
-
-    event.preventDefault();
-    const unit = event.deltaMode === 1 ? 18 : 1;
-    const acceleration = Math.abs(event.deltaY) > 60 ? 1.06 : 0.9;
-    targetY = clampScroll(targetY + event.deltaY * unit * acceleration);
+  const pushDelta = (deltaY) => {
+    if (!Number.isFinite(deltaY) || deltaY === 0) return;
+    state.targetY = clampScroll(state.targetY + deltaY);
     start();
   };
 
-  const syncWithNativeScroll = () => {
-    if (!animating) {
-      targetY = window.scrollY;
-      currentY = window.scrollY;
+  const normalizeWheelDelta = (event) => {
+    const modeFactor =
+      event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight * 0.85 : 1;
+    return event.deltaY * modeFactor * config.wheelMultiplier;
+  };
+
+  const handleWheel = (event) => {
+    if (!isEnabled()) return;
+    if (event.ctrlKey || event.metaKey) return;
+    if (Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
+
+    event.preventDefault();
+    pushDelta(normalizeWheelDelta(event));
+  };
+
+  const handleKeydown = (event) => {
+    if (!isEnabled()) return;
+
+    const target = event.target;
+    if (target instanceof HTMLElement) {
+      const tag = target.tagName;
+      const editable = target.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      if (editable) return;
     }
+
+    let delta = 0;
+
+    switch (event.key) {
+      case "ArrowDown":
+        delta = 82;
+        break;
+      case "ArrowUp":
+        delta = -82;
+        break;
+      case "PageDown":
+      case " ":
+        delta = window.innerHeight * 0.88;
+        break;
+      case "PageUp":
+        delta = -window.innerHeight * 0.88;
+        break;
+      case "Home":
+        event.preventDefault();
+        state.targetY = 0;
+        start();
+        return;
+      case "End":
+        event.preventDefault();
+        state.targetY = maxScrollTop();
+        start();
+        return;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    pushDelta(delta);
+  };
+
+  const syncWithNativeScroll = () => {
+    if (state.running) return;
+    state.targetY = window.scrollY;
+    state.currentY = window.scrollY;
   };
 
   const handleResize = () => {
-    targetY = clampScroll(targetY);
-    currentY = clampScroll(currentY);
+    state.targetY = clampScroll(state.targetY);
+    state.currentY = clampScroll(state.currentY);
+  };
+
+  const handleModeChange = () => {
+    if (isEnabled()) return;
+    stop();
+    state.targetY = window.scrollY;
+    state.currentY = window.scrollY;
   };
 
   window.addEventListener("wheel", handleWheel, { passive: false });
+  window.addEventListener("keydown", handleKeydown, { passive: false });
   window.addEventListener("scroll", syncWithNativeScroll, { passive: true });
   window.addEventListener("resize", handleResize, { passive: true });
-  window.addEventListener("beforeunload", () => {
-    if (rafId) cancelAnimationFrame(rafId);
-  });
+  addMediaListener(reducedMotionQuery, handleModeChange);
+  addMediaListener(coarsePointerQuery, handleModeChange);
+  window.addEventListener("beforeunload", stop);
 };
 
 setupInertiaScroll();

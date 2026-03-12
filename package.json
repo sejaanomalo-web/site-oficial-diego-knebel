@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite premium-landing --host 0.0.0.0 --port 5173 --strictPort",
     "dev:lan": "bash scripts/dev-lan.sh",
-    "build": "vite build premium-landing",
+    "build": "vite build premium-landing --outDir ../dist --emptyOutDir",
     "preview": "vite preview --host 0.0.0.0 --port 4173 --strictPort"
   },
   "devDependencies": {

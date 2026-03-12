@@ -1,0 +1,15 @@
+{
+  "name": "site-oficial",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Servidor de desenvolvimento para a landing page premium.",
+  "scripts": {
+    "dev": "vite premium-landing --host 0.0.0.0 --port 5173 --strictPort",
+    "dev:lan": "bash scripts/dev-lan.sh",
+    "build": "vite build premium-landing",
+    "preview": "vite preview --host 0.0.0.0 --port 4173 --strictPort"
+  },
+  "devDependencies": {
+    "vite": "^5.4.11"
+  }
+}

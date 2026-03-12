@@ -7,6 +7,10 @@ const formFeedback = document.getElementById("form-feedback");
 const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 const coarsePointerQuery = window.matchMedia("(hover: none), (pointer: coarse)");
 const narrowViewportQuery = window.matchMedia("(max-width: 991px)");
+const GOOGLE_SHEETS_WEBAPP_URL =
+  "https://script.google.com/macros/s/AKfycby3KeHcF2AldB_AwSb4r-_0XDzBEyY-fghXqDwr9lT2B7VsEn8kjmguusAVrRWPmAq20Q/exec";
+const LEAD_ORIGIN = "leads-site-oficial-diego-knebel";
+const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"];
 
 let ticking = false;
 let allowOrbParallax = true;
@@ -56,151 +60,12 @@ addMediaListener(coarsePointerQuery, applyPerformanceProfile);
 addMediaListener(narrowViewportQuery, applyPerformanceProfile);
 applyPerformanceProfile();
 
-const setupInertiaScroll = () => {
-  const state = {
-    targetY: window.scrollY,
-    currentY: window.scrollY,
-    velocity: 0,
-    rafId: 0,
-    running: false
-  };
-
-  const config = {
-    wheelMultiplier: 0.94,
-    spring: 0.11,
-    friction: 0.78,
-    minDistance: 0.15,
-    minVelocity: 0.15
-  };
-
-  const maxScrollTop = () => Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-  const clampScroll = (value) => Math.min(maxScrollTop(), Math.max(0, value));
-  const isEnabled = () => !reducedMotionQuery.matches && !coarsePointerQuery.matches;
-
-  const stop = () => {
-    if (state.rafId) cancelAnimationFrame(state.rafId);
-    state.rafId = 0;
-    state.running = false;
-    state.velocity = 0;
-  };
-
-  const tick = () => {
-    const distance = state.targetY - state.currentY;
-
-    state.velocity += distance * config.spring;
-    state.velocity *= config.friction;
-    state.currentY = clampScroll(state.currentY + state.velocity);
-    window.scrollTo(0, state.currentY);
-
-    if (Math.abs(distance) <= config.minDistance && Math.abs(state.velocity) <= config.minVelocity) {
-      state.currentY = state.targetY;
-      window.scrollTo(0, state.currentY);
-      stop();
-      return;
-    }
-
-    state.rafId = requestAnimationFrame(tick);
-  };
-
-  const start = () => {
-    if (state.running || !isEnabled()) return;
-    state.running = true;
-    state.rafId = requestAnimationFrame(tick);
-  };
-
-  const pushDelta = (deltaY) => {
-    if (!Number.isFinite(deltaY) || deltaY === 0) return;
-    state.targetY = clampScroll(state.targetY + deltaY);
-    start();
-  };
-
-  const normalizeWheelDelta = (event) => {
-    const modeFactor =
-      event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight * 0.85 : 1;
-    return event.deltaY * modeFactor * config.wheelMultiplier;
-  };
-
-  const handleWheel = (event) => {
-    if (!isEnabled()) return;
-    if (event.ctrlKey || event.metaKey) return;
-    if (Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
-
-    event.preventDefault();
-    pushDelta(normalizeWheelDelta(event));
-  };
-
-  const handleKeydown = (event) => {
-    if (!isEnabled()) return;
-
-    const target = event.target;
-    if (target instanceof HTMLElement) {
-      const tag = target.tagName;
-      const editable = target.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-      if (editable) return;
-    }
-
-    let delta = 0;
-
-    switch (event.key) {
-      case "ArrowDown":
-        delta = 82;
-        break;
-      case "ArrowUp":
-        delta = -82;
-        break;
-      case "PageDown":
-      case " ":
-        delta = window.innerHeight * 0.88;
-        break;
-      case "PageUp":
-        delta = -window.innerHeight * 0.88;
-        break;
-      case "Home":
-        event.preventDefault();
-        state.targetY = 0;
-        start();
-        return;
-      case "End":
-        event.preventDefault();
-        state.targetY = maxScrollTop();
-        start();
-        return;
-      default:
-        return;
-    }
-
-    event.preventDefault();
-    pushDelta(delta);
-  };
-
-  const syncWithNativeScroll = () => {
-    if (state.running) return;
-    state.targetY = window.scrollY;
-    state.currentY = window.scrollY;
-  };
-
-  const handleResize = () => {
-    state.targetY = clampScroll(state.targetY);
-    state.currentY = clampScroll(state.currentY);
-  };
-
-  const handleModeChange = () => {
-    if (isEnabled()) return;
-    stop();
-    state.targetY = window.scrollY;
-    state.currentY = window.scrollY;
-  };
-
-  window.addEventListener("wheel", handleWheel, { passive: false });
-  window.addEventListener("keydown", handleKeydown, { passive: false });
-  window.addEventListener("scroll", syncWithNativeScroll, { passive: true });
-  window.addEventListener("resize", handleResize, { passive: true });
-  addMediaListener(reducedMotionQuery, handleModeChange);
-  addMediaListener(coarsePointerQuery, handleModeChange);
-  window.addEventListener("beforeunload", stop);
+const applyScrollBehavior = () => {
+  document.documentElement.style.scrollBehavior = reducedMotionQuery.matches ? "auto" : "smooth";
 };
 
-setupInertiaScroll();
+addMediaListener(reducedMotionQuery, applyScrollBehavior);
+applyScrollBehavior();
 
 window.addEventListener("load", () => {
   setTimeout(() => {
@@ -276,13 +141,87 @@ accordionItems.forEach((item) => {
 });
 
 if (form && formFeedback) {
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    formFeedback.textContent = "Mensagem enviada com sucesso. Em breve, nosso time entrará em contato.";
-    form.reset();
+  let feedbackTimer = 0;
+  const submitButton = form.querySelector('button[type="submit"]');
+  const submitText = submitButton?.textContent ?? "";
 
-    window.setTimeout(() => {
+  const pickAttribution = () => {
+    const params = new URLSearchParams(window.location.search);
+    const attribution = {};
+
+    UTM_KEYS.forEach((key) => {
+      attribution[key] = params.get(key) || "";
+    });
+
+    return attribution;
+  };
+
+  const sendLeadToSheets = async (payload) => {
+    const body = new URLSearchParams();
+
+    Object.entries(payload).forEach(([key, value]) => {
+      body.append(key, value == null ? "" : String(value));
+    });
+
+    await fetch(GOOGLE_SHEETS_WEBAPP_URL, {
+      method: "POST",
+      mode: "no-cors",
+      body
+    });
+  };
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const data = new FormData(form);
+    const attribution = pickAttribution();
+    const payload = {
+      nome: String(data.get("nome") || "").trim(),
+      email: String(data.get("email") || "").trim(),
+      telefone: String(data.get("telefone") || "").trim(),
+      assunto: String(data.get("assunto") || "").trim(),
+      mensagem: String(data.get("mensagem") || "").trim(),
+      pagina_url: window.location.href,
+      origem: LEAD_ORIGIN,
+      referer: document.referrer || "",
+      user_agent: navigator.userAgent || "",
+      ...attribution
+    };
+
+    if (feedbackTimer) window.clearTimeout(feedbackTimer);
+    formFeedback.style.color = "#f5dec3";
+    formFeedback.textContent = "Enviando sua mensagem...";
+
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.style.opacity = "0.75";
+      submitButton.style.cursor = "wait";
+      submitButton.textContent = "Enviando...";
+    }
+
+    try {
+      await sendLeadToSheets(payload);
+      formFeedback.style.color = "#bfe3ce";
+      formFeedback.textContent =
+        "Mensagem enviada com sucesso. Em breve, nosso time entrará em contato.";
+      form.reset();
+    } catch (error) {
+      formFeedback.style.color = "#ffd0c1";
+      formFeedback.textContent =
+        "Não foi possível enviar agora. Tente novamente em instantes ou fale conosco pelo Instagram.";
+      console.error("Falha ao enviar lead para o Apps Script:", error);
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.style.opacity = "";
+        submitButton.style.cursor = "";
+        submitButton.textContent = submitText;
+      }
+    }
+
+    feedbackTimer = window.setTimeout(() => {
       formFeedback.textContent = "";
+      formFeedback.style.color = "";
     }, 5500);
   });
 }
